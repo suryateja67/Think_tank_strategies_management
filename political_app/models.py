@@ -1,6 +1,6 @@
 from django.db import models
 
-# Create your models here.
+
 class Volunteer(models.Model):
     id = models.AutoField(primary_key=True)
     name = models.CharField(max_length=100)
@@ -25,6 +25,7 @@ class Task(models.Model):
     name = models.CharField(max_length=100)
     roll = models.IntegerField(null=True, blank=True)
     volunteer = models.ForeignKey(Volunteer, on_delete=models.SET_NULL, default=None, null=True, blank=True)
+    status = models.CharField(max_length=100, default="pending")
 
 
 class Client(models.Model):
