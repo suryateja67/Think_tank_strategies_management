@@ -8,14 +8,14 @@ from django.views.decorators.csrf import csrf_exempt
 from django.core.mail import send_mail
 from political_app.models import Volunteer, Task, Client, Admin
 from .utils import hash_password, check_password, check_unique_email, generate_jwt, admin_access, volunteer_access, client_access
-
+from django.shortcuts import render
 
 
 class Home(APIView): 
     def get(self, request):
         if request.data.get('role') in ['admin', 'volunteer']:
             return Response("Welcome to the application")
-        return Response("Unauthorized", status=403)
+        return render(request, 'login.html')
 
 
 class Login(APIView):
