@@ -3,10 +3,6 @@ from .models import Admin, Volunteer, Client
 import jwt
 import datetime
 from decouple import config
-from rest_framework.response import Response
-from rest_framework import status
-import os
-import django
 
 
 def hash_password(password: str) -> str:
@@ -40,7 +36,7 @@ def generate_jwt(role, user_id):
     payload = {
         'user_id': user_id,
         'role' : role,
-        'exp': datetime.datetime.utcnow() + datetime.timedelta(seconds=5),
+        'exp': datetime.datetime.utcnow() + datetime.timedelta(hours=int(config("TOKEN_EXPIRY_TIME"))),
     }
     
     token = jwt.encode(payload, secret_key, algorithm='HS256')

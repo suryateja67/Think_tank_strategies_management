@@ -20,14 +20,14 @@ class Home(APIView):
 
 class Login(APIView):
     def post(self, request):
-        user_name = request.data.get('user_name')
+        username = request.data.get('username')
         password = request.data.get('password')
         
-        if not user_name or not password:
+        if not username or not password:
             return Response({'error': 'Username and password are required.'}, status=status.HTTP_400_BAD_REQUEST)
         
         try:
-            admin = Admin.objects.get(email=user_name)
+            admin = Admin.objects.get(email=username)
             if check_password(admin.password, password):
                 return Response({'message': 'Login successful',
                                  'admin': admin.name,
@@ -35,7 +35,7 @@ class Login(APIView):
                                  'token': generate_jwt(admin.role, admin.id)}, status=status.HTTP_200_OK)
         except Admin.DoesNotExist:
             try:
-                volunteer = Volunteer.objects.get(email=user_name)
+                volunteer = Volunteer.objects.get(email=username)
                 if check_password(volunteer.password, password):
                     return Response({'message': 'Login successful',
                                      'volunteer': volunteer.name,
@@ -210,37 +210,38 @@ class VolunteerCreate(APIView):
 class TaskCreate(APIView):
     def post(self, request):
         if admin_access(request.data.get('token')):
+
+            name = request.data.get('name')
+            roll = request.data.get('roll')
+            volunteer_id = request.data.get('volunteer_id')
+            client_id = request.data.get('client_id')
+
+            if not name or not roll:
+                return Response({'error': 'Name and roll parameters are required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            try:
+                task = Task.objects.create(name=name, roll=roll)
+
+                if client_id:
+                    try:
+                        client = Client.objects.get(id=client_id)
+                        task.client = client
+                    except Client.DoesNotExist:
+                        return Response({'error': 'Client not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+                if volunteer_id:
+                    try:
+                        volunteer = Volunteer.objects.get(id=volunteer_id)
+                        task.volunteers.set([volunteer])
+                    except Volunteer.DoesNotExist:
+                        return Response({'error': 'Volunteer not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+                task.save()
+                return Response({'message': f'Task created: {task.name}'}, status=status.HTTP_201_CREATED)
+            except Exception as e:
+                return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        else:
             return Response({'error': 'Unauthorized'}, status=status.HTTP_401_UNAUTHORIZED)
-
-        name = request.data.get('name')
-        roll = request.data.get('roll')
-        volunteer_id = request.data.get('volunteer_id')
-        client_id = request.data.get('client_id')
-
-        if not name or not roll:
-            return Response({'error': 'Name and roll parameters are required.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        try:
-            task = Task.objects.create(name=name, roll=roll)
-
-            if client_id:
-                try:
-                    client = Client.objects.get(id=client_id)
-                    task.client = client
-                except Client.DoesNotExist:
-                    return Response({'error': 'Client not found.'}, status=status.HTTP_404_NOT_FOUND)
-
-            if volunteer_id:
-                try:
-                    volunteer = Volunteer.objects.get(id=volunteer_id)
-                    task.volunteers.set([volunteer])
-                except Volunteer.DoesNotExist:
-                    return Response({'error': 'Volunteer not found.'}, status=status.HTTP_404_NOT_FOUND)
-
-            task.save()
-            return Response({'message': f'Task created: {task.name}'}, status=status.HTTP_201_CREATED)
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class ClientCreate(APIView):
@@ -330,10 +331,13 @@ class TaskList(APIView):
                 for task in tasks_instances
             ]
             return Response(tasks, status=status.HTTP_200_OK)
-        
+        else:
+            return Response({'error': 'Unauthorized'}, status=status.HTTP_401_UNAUTHORIZED)
 
 class AdminList(APIView):
     def get(self, request):
+        print(request.data.get('token'))
+        print(admin_access(request.data.get('token')))
         if admin_access(request.data.get('token')):
             admins_instances = Admin.objects.all()
             admins = [
@@ -346,6 +350,8 @@ class AdminList(APIView):
                 for admin in admins_instances
             ]
             return Response(admins, status=status.HTTP_200_OK)
+        else:
+            return Response({'error': 'Unauthorized'}, status=status.HTTP_401_UNAUTHORIZED)
 
 
 class ClientList(APIView):
@@ -363,7 +369,8 @@ class ClientList(APIView):
                 for client in clients_instances
             ]
             return Response(clients, status=status.HTTP_200_OK)
-        
+        else:
+            return Response({'error': 'Unauthorized'}, status=status.HTTP_401_UNAUTHORIZED)
 class AdminEdit(APIView):
     def put(self, request):
         if admin_access(request.data.get('token')):
@@ -446,45 +453,46 @@ class VolunteerEdit(APIView):
 class TaskEdit(APIView):
     def put(self, request):
         if admin_access(request.data.get('token')):
+
+            id = request.data.get('id')
+            if not id:
+                return Response({'error': 'ID required'}, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                task = Task.objects.get(id=id)
+            except Task.DoesNotExist:
+                return Response({'error': 'Task not found'}, status=status.HTTP_404_NOT_FOUND)
+            
+            name = request.data.get('name')
+            roll = request.data.get('roll')
+            volunteer_id = request.data.get('volunteer_id')
+            client_id = request.data.get('client_id')
+            task_status = request.data.get('status')
+
+            if name:
+                task.name = name
+            if roll:
+                task.roll = roll
+            if task_status:
+                task.status = task_status
+
+            if volunteer_id:
+                try:
+                    volunteer = Volunteer.objects.get(id=volunteer_id)
+                    task.volunteers.set([volunteer])
+                except Volunteer.DoesNotExist:
+                    return Response({'error': 'Volunteer not found'}, status=status.HTTP_404_NOT_FOUND)
+
+            if client_id:
+                try:
+                    client = Client.objects.get(id=client_id)
+                    task.client = client
+                except Client.DoesNotExist:
+                    return Response({'error': 'Client not found'}, status=status.HTTP_404_NOT_FOUND)
+
+            task.save()
+            return Response({'message': 'Task updated successfully'}, status=status.HTTP_200_OK)
+        else:
             return Response({'error': 'Unauthorized'}, status=status.HTTP_401_UNAUTHORIZED)
-
-        id = request.data.get('id')
-        if not id:
-            return Response({'error': 'ID required'}, status=status.HTTP_400_BAD_REQUEST)
-        try:
-            task = Task.objects.get(id=id)
-        except Task.DoesNotExist:
-            return Response({'error': 'Task not found'}, status=status.HTTP_404_NOT_FOUND)
-        
-        name = request.data.get('name')
-        roll = request.data.get('roll')
-        volunteer_id = request.data.get('volunteer_id')
-        client_id = request.data.get('client_id')
-        task_status = request.data.get('status')
-
-        if name:
-            task.name = name
-        if roll:
-            task.roll = roll
-        if task_status:
-            task.status = task_status
-
-        if volunteer_id:
-            try:
-                volunteer = Volunteer.objects.get(id=volunteer_id)
-                task.volunteers.set([volunteer])
-            except Volunteer.DoesNotExist:
-                return Response({'error': 'Volunteer not found'}, status=status.HTTP_404_NOT_FOUND)
-
-        if client_id:
-            try:
-                client = Client.objects.get(id=client_id)
-                task.client = client
-            except Client.DoesNotExist:
-                return Response({'error': 'Client not found'}, status=status.HTTP_404_NOT_FOUND)
-
-        task.save()
-        return Response({'message': 'Task updated successfully'}, status=status.HTTP_200_OK)
     
 
 class SingleVolunteer(APIView):
