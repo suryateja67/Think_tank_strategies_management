@@ -7,7 +7,7 @@ from django.http import HttpResponse, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.core.mail import send_mail
 from political_app.models import Volunteer, Task, Client, Admin
-from .utils import hash_password, check_password, check_unique_email
+from .utils import hash_password, check_password, check_unique_email, generate_jwt, admin_access, volunteer_access, client_access
 
 
 
@@ -20,25 +20,27 @@ class Home(APIView):
 
 class Login(APIView):
     def post(self, request):
-        user_name = request.data.get('user_name')
+        username = request.data.get('username')
         password = request.data.get('password')
         
-        if not user_name or not password:
+        if not username or not password:
             return Response({'error': 'Username and password are required.'}, status=status.HTTP_400_BAD_REQUEST)
         
         try:
-            admin = Admin.objects.get(email=user_name)
+            admin = Admin.objects.get(email=username)
             if check_password(admin.password, password):
                 return Response({'message': 'Login successful',
                                  'admin': admin.name,
-                                 'role': 'admin'}, status=status.HTTP_200_OK)
+                                 'role': 'admin',
+                                 'token': generate_jwt(admin.role, admin.id)}, status=status.HTTP_200_OK)
         except Admin.DoesNotExist:
             try:
-                volunteer = Volunteer.objects.get(email=user_name)
+                volunteer = Volunteer.objects.get(email=username)
                 if check_password(volunteer.password, password):
                     return Response({'message': 'Login successful',
                                      'volunteer': volunteer.name,
-                                     'role': 'volunteer'}, status=status.HTTP_200_OK)
+                                     'role': 'volunteer',
+                                     'token': generate_jwt(volunteer.role, volunteer.id)}, status=status.HTTP_200_OK)
             except Volunteer.DoesNotExist:
                 return Response({'error': 'Invalid credentials.'}, status=status.HTTP_401_UNAUTHORIZED)
         
@@ -128,17 +130,16 @@ class ForgotPassword(APIView):
 
 class AdminCreate(APIView):
     def post(self, request):
-        if request.data.get('role') == 'admin':
+        if admin_access(request.data.get('token')):
             name = request.data.get('name')
             phone_number = request.data.get('phone_number')
             email = request.data.get('email')
-            amount_paid = request.data.get('amount_paid')
             alphabet = string.ascii_letters + string.digits
             password = ''.join(secrets.choice(alphabet) for _ in range(12))
             
             if name and email and password:
                 if check_unique_email(email):
-                    admin = Admin.objects.create(name=name, phone_number=phone_number, email=email,amount_paid=amount_paid, password=hash_password(password))
+                    admin = Admin.objects.create(name=name, phone_number=phone_number, email=email, password=hash_password(password))
                     if admin:
                         subject = 'Admin Account Created'
                         message = f'''Hello {name},
@@ -169,7 +170,7 @@ class AdminCreate(APIView):
 
 class VolunteerCreate(APIView):
     def post(self, request):
-        if request.data.get('role') == 'admin':
+        if admin_access(request.data.get('token')):
             name = request.data.get('name')
             roll = request.data.get('roll')
             phone_number = request.data.get('phone_number')
@@ -208,43 +209,44 @@ class VolunteerCreate(APIView):
 
 class TaskCreate(APIView):
     def post(self, request):
-        if request.data.get('role') != 'admin':
+        if admin_access(request.data.get('token')):
+
+            name = request.data.get('name')
+            roll = request.data.get('roll')
+            volunteer_id = request.data.get('volunteer_id')
+            client_id = request.data.get('client_id')
+
+            if not name or not roll:
+                return Response({'error': 'Name and roll parameters are required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+            try:
+                task = Task.objects.create(name=name, roll=roll)
+
+                if client_id:
+                    try:
+                        client = Client.objects.get(id=client_id)
+                        task.client = client
+                    except Client.DoesNotExist:
+                        return Response({'error': 'Client not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+                if volunteer_id:
+                    try:
+                        volunteer = Volunteer.objects.get(id=volunteer_id)
+                        task.volunteers.set([volunteer])
+                    except Volunteer.DoesNotExist:
+                        return Response({'error': 'Volunteer not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+                task.save()
+                return Response({'message': f'Task created: {task.name}'}, status=status.HTTP_201_CREATED)
+            except Exception as e:
+                return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        else:
             return Response({'error': 'Unauthorized'}, status=status.HTTP_401_UNAUTHORIZED)
-
-        name = request.data.get('name')
-        roll = request.data.get('roll')
-        volunteer_id = request.data.get('volunteer_id')
-        client_id = request.data.get('client_id')
-
-        if not name or not roll:
-            return Response({'error': 'Name and roll parameters are required.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        try:
-            task = Task.objects.create(name=name, roll=roll)
-
-            if client_id:
-                try:
-                    client = Client.objects.get(id=client_id)
-                    task.client = client
-                except Client.DoesNotExist:
-                    return Response({'error': 'Client not found.'}, status=status.HTTP_404_NOT_FOUND)
-
-            if volunteer_id:
-                try:
-                    volunteer = Volunteer.objects.get(id=volunteer_id)
-                    task.volunteers.set([volunteer])
-                except Volunteer.DoesNotExist:
-                    return Response({'error': 'Volunteer not found.'}, status=status.HTTP_404_NOT_FOUND)
-
-            task.save()
-            return Response({'message': f'Task created: {task.name}'}, status=status.HTTP_201_CREATED)
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class ClientCreate(APIView):
     def post(self, request):
-        if request.data.get('role') == 'admin':
+        if admin_access(request.data.get('token')):
             name = request.data.get('name')
             phone_number = request.data.get('phone_number')
             constituency = request.data.get('constituency')
@@ -300,7 +302,7 @@ class ClientCreate(APIView):
 
 class VolunteerList(APIView):
     def get(self, request):
-        if request.data.get('role') == 'admin':
+        if admin_access(request.data.get('token')):
             volunteers_instances = Volunteer.objects.all()
             volunteers = [
                 {
@@ -318,7 +320,7 @@ class VolunteerList(APIView):
 
 class TaskList(APIView):
     def get(self, request):
-        if request.data.get('role') in ['admin', 'volunteer']:
+        if volunteer_access(request.data.get('token')):
             tasks_instances = Task.objects.all()
             tasks = [
                 {
@@ -329,11 +331,14 @@ class TaskList(APIView):
                 for task in tasks_instances
             ]
             return Response(tasks, status=status.HTTP_200_OK)
-        
+        else:
+            return Response({'error': 'Unauthorized'}, status=status.HTTP_401_UNAUTHORIZED)
 
 class AdminList(APIView):
     def get(self, request):
-        if request.data.get('role') == 'admin':
+        print(request.data.get('token'))
+        print(admin_access(request.data.get('token')))
+        if admin_access(request.data.get('token')):
             admins_instances = Admin.objects.all()
             admins = [
                 {
@@ -345,11 +350,13 @@ class AdminList(APIView):
                 for admin in admins_instances
             ]
             return Response(admins, status=status.HTTP_200_OK)
+        else:
+            return Response({'error': 'Unauthorized'}, status=status.HTTP_401_UNAUTHORIZED)
 
 
 class ClientList(APIView):
     def get(self, request):
-        if request.data.get('role') == 'admin':
+        if admin_access(request.data.get('token')):
             clients_instances = Client.objects.all()
             clients = [
                 {
@@ -362,10 +369,11 @@ class ClientList(APIView):
                 for client in clients_instances
             ]
             return Response(clients, status=status.HTTP_200_OK)
-        
+        else:
+            return Response({'error': 'Unauthorized'}, status=status.HTTP_401_UNAUTHORIZED)
 class AdminEdit(APIView):
-    def post(self, request):
-        if request.data.get('role') == 'admin':
+    def put(self, request):
+        if admin_access(request.data.get('token')):
             id = request.data.get('id')
             name = request.data.get('name')
             phone_number = request.data.get('phone_number')
@@ -389,8 +397,8 @@ class AdminEdit(APIView):
 
 
 class ClientEdit(APIView):
-    def post(self, request):
-        if request.data.get('role') == 'admin':
+    def put(self, request):
+        if admin_access(request.data.get('token')):
             id = request.data.get('id')
             name = request.data.get('name')
             phone_number = request.data.get('phone_number')
@@ -418,8 +426,8 @@ class ClientEdit(APIView):
         
 
 class VolunteerEdit(APIView):
-    def post(self, request):
-        if request.data.get('role') == 'admin':
+    def put(self, request):
+        if admin_access(request.data.get('token')):
             id = request.data.get('id')
             name = request.data.get('name')
             roll = request.data.get('roll')
@@ -443,52 +451,53 @@ class VolunteerEdit(APIView):
         
 
 class TaskEdit(APIView):
-    def post(self, request):
-        if request.data.get('role') != 'admin':
+    def put(self, request):
+        if admin_access(request.data.get('token')):
+
+            id = request.data.get('id')
+            if not id:
+                return Response({'error': 'ID required'}, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                task = Task.objects.get(id=id)
+            except Task.DoesNotExist:
+                return Response({'error': 'Task not found'}, status=status.HTTP_404_NOT_FOUND)
+            
+            name = request.data.get('name')
+            roll = request.data.get('roll')
+            volunteer_id = request.data.get('volunteer_id')
+            client_id = request.data.get('client_id')
+            task_status = request.data.get('status')
+
+            if name:
+                task.name = name
+            if roll:
+                task.roll = roll
+            if task_status:
+                task.status = task_status
+
+            if volunteer_id:
+                try:
+                    volunteer = Volunteer.objects.get(id=volunteer_id)
+                    task.volunteers.set([volunteer])
+                except Volunteer.DoesNotExist:
+                    return Response({'error': 'Volunteer not found'}, status=status.HTTP_404_NOT_FOUND)
+
+            if client_id:
+                try:
+                    client = Client.objects.get(id=client_id)
+                    task.client = client
+                except Client.DoesNotExist:
+                    return Response({'error': 'Client not found'}, status=status.HTTP_404_NOT_FOUND)
+
+            task.save()
+            return Response({'message': 'Task updated successfully'}, status=status.HTTP_200_OK)
+        else:
             return Response({'error': 'Unauthorized'}, status=status.HTTP_401_UNAUTHORIZED)
-
-        id = request.data.get('id')
-        if not id:
-            return Response({'error': 'ID required'}, status=status.HTTP_400_BAD_REQUEST)
-        try:
-            task = Task.objects.get(id=id)
-        except Task.DoesNotExist:
-            return Response({'error': 'Task not found'}, status=status.HTTP_404_NOT_FOUND)
-        
-        name = request.data.get('name')
-        roll = request.data.get('roll')
-        volunteer_id = request.data.get('volunteer_id')
-        client_id = request.data.get('client_id')
-        task_status = request.data.get('status')
-
-        if name:
-            task.name = name
-        if roll:
-            task.roll = roll
-        if task_status:
-            task.status = task_status
-
-        if volunteer_id:
-            try:
-                volunteer = Volunteer.objects.get(id=volunteer_id)
-                task.volunteers.set([volunteer])
-            except Volunteer.DoesNotExist:
-                return Response({'error': 'Volunteer not found'}, status=status.HTTP_404_NOT_FOUND)
-
-        if client_id:
-            try:
-                client = Client.objects.get(id=client_id)
-                task.client = client
-            except Client.DoesNotExist:
-                return Response({'error': 'Client not found'}, status=status.HTTP_404_NOT_FOUND)
-
-        task.save()
-        return Response({'message': 'Task updated successfully'}, status=status.HTTP_200_OK)
     
 
 class SingleVolunteer(APIView):
     def get(self, request):
-        if request.data.get('role') == 'admin':
+        if admin_access(request.data.get('token')):
             try:
                 volunteer = Volunteer.objects.get(id=request.data.get('id'))
                 volunteer_data = {
@@ -508,7 +517,7 @@ class SingleVolunteer(APIView):
 
 class SingleClient(APIView):
     def get(self, request):
-        if request.data.get('role') == 'admin':
+        if admin_access(request.data.get('token')):
             try:
                 if request.data.get('id') is not None:
                     client = Client.objects.get(id=request.data.get('id'))
@@ -535,7 +544,7 @@ class SingleClient(APIView):
 
 class SingleTask(APIView):
     def get(self, request):
-        if request.data.get('role') == 'admin':
+        if admin_access(request.data.get('token')):
             try:
                 if request.data.get('id') is not None:
                     task = Task.objects.get(id=request.data.get('id'))
