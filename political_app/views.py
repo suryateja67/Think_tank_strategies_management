@@ -15,7 +15,7 @@ class Home(APIView):
     def get(self, request):
         if request.data.get('role') in ['admin', 'volunteer']:
             return Response("Welcome to the application")
-        return render(request, 'login.html')
+        return Response ('Unauthorized', status=status.HTTP_401_UNAUTHORIZED)
 
 
 class Login(APIView):
@@ -31,7 +31,6 @@ class Login(APIView):
             if check_password(admin.password, password):
                 return Response({'message': 'Login successful',
                                  'admin': admin.name,
-                                 'role': 'admin',
                                  'token': generate_jwt(admin.role, admin.id)}, status=status.HTTP_200_OK)
         except Admin.DoesNotExist:
             try:
@@ -39,7 +38,6 @@ class Login(APIView):
                 if check_password(volunteer.password, password):
                     return Response({'message': 'Login successful',
                                      'volunteer': volunteer.name,
-                                     'role': 'volunteer',
                                      'token': generate_jwt(volunteer.role, volunteer.id)}, status=status.HTTP_200_OK)
             except Volunteer.DoesNotExist:
                 return Response({'error': 'Invalid credentials.'}, status=status.HTTP_401_UNAUTHORIZED)
@@ -163,7 +161,7 @@ class AdminCreate(APIView):
                 else:
                     return JsonResponse({'message': 'Email already exists'}, status=400)
             else:
-                return JsonResponse({'message': 'Name, email, and password must be provided'}, status=400)
+                return JsonResponse({'message': 'Name and email must be provided'}, status=400)
         else:  
             return Response({'error': 'Unauthorized'}, status=status.HTTP_401_UNAUTHORIZED)
 
@@ -336,7 +334,6 @@ class TaskList(APIView):
 
 class AdminList(APIView):
     def get(self, request):
-        print(request.data.get('token'))
         print(admin_access(request.data.get('token')))
         if admin_access(request.data.get('token')):
             admins_instances = Admin.objects.all()
